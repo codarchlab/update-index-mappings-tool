@@ -26,6 +26,7 @@ run the script.
 
 ```bash
 npm install
+```
 
 Before running the tool, check out the *config/application.json* to match your
 environment.
