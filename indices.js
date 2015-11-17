@@ -117,10 +117,8 @@ function retrieveCurrentIndex(alias, callback) {
  * Determines if only the index named indexName does exist and no prefixed
  * versions of it, which is the only condition an initial update is allowed
  *
- * @param callback(updateCondition)
- *   initialUpdateAllowed is boolean can have one of the values
- *     false
- *     true
+ * @param callback(initialUpdateAllowed)
+ *   initialUpdateAllowed: boolean
  */
 var determineInitialUpdateCondition = function(callback){
 
