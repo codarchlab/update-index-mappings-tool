@@ -120,7 +120,7 @@ function retrieveCurrentIndex(alias, callback) {
  * @param callback(initialUpdateAllowed)
  *   initialUpdateAllowed: boolean
  */
-var determineInitialUpdateCondition = function(callback){
+var assertInitialUpdateAllowed = function(callback){
 
     client.indices.get({index:indexName}, function(indexDoesNotExist) {
         client.indices.get({index:indexName+"_1"}, function(index_1DoesNotExist) {
@@ -130,11 +130,12 @@ var determineInitialUpdateCondition = function(callback){
                 console.log("Index "+indexName+ "_1 exists: "+!index_1DoesNotExist);
                 console.log("Index "+indexName+ "_2 exists: "+!index_2DoesNotExist);
 
-                if (indexDoesNotExist) return callback(false);
-                if (index_2DoesNotExist&&index_1DoesNotExist)
-                    return callback(true);
-                else
-                    return callback(false);
+                if (!indexDoesNotExist&&index_2DoesNotExist&&index_1DoesNotExist)
+                    return callback(null,"");
+
+                return callback("Initial update is not allowed.\n" +
+                    "Index "+indexName + " must exist.\n" +
+                    "No index or alias named "+indexName+"_1 or "+ indexName +"_2 must exist.","");
             });
         });
     });
@@ -154,10 +155,10 @@ var determineInitialUpdateCondition = function(callback){
  */
 var delAndPutAlias = function(newIndex,currentIndex,alias,callback) {
     client.indices.delete({index: alias}, function (err, res) {
-        console.log("DEBUG - Deleted old index " + alias, res);
+
         client.indices.putAlias({index: newIndex, name: alias}, function (err, res) {
             //if (err) return callback(err, null);
-            console.log("DEBUG - Added alias", res);
+
             return callback(null, alias);
         })
     });
@@ -173,11 +174,11 @@ var switchAlias = function(newIndex,currentIndex,alias,callback) {
     client.indices.deleteAlias(
         { index: currentIndex, name: indexName}, function(err, res) {
             if (err) return callback(err, null);
-            console.log("DEBUG - Deleted alias", res);
+
             client.indices.putAlias({ index: newIndex, name: indexName }, function(err, res) {
                 if (err) return callback(err, null);
-                console.log("DEBUG - Added alias", res);
-                return callback(null, { success: true, currentIndex: currentIndex });
+
+                return callback(null, { success: true, currentIndex: newIndex });
             });
         })
 };
@@ -223,8 +224,8 @@ var updateIndexMappings = function(callback) {
         if (currentIndex == indexName + "_2") {
             var newIndex = indexName + "_1";
         }
-
         console.log("Concrete indexName: "+currentIndex);
+        
         performUpdate(
             newIndex,currentIndex,indexName,
             switchAlias,callback);
@@ -232,39 +233,21 @@ var updateIndexMappings = function(callback) {
 };
 
 /**
- * Handles the existence conditions determindes in
- * {@link determineIndexExistenceConditions}. Under certain
- * conditions (see implementation) the initial index update
- * operation gets performed.
- *
  * @param indexDoesNotExist
  * @param indexAlias_1DoesNotExist
  * @param indexAlias_2DoesNotExist
  * @param callback
  * @returns a callback (res,msg) with a msg describing if the update operation
- *   has been performed or why      if not.
+ *   has been performed or why if not.
  */
 var initialUpdateIndexMappings= function(
     callback) {
 
-    determineInitialUpdateCondition(function(initialUpdateAllowed) {
-
-        if (initialUpdateAllowed==false)
-            return callback(null,"Initial update is not allowed.\n" +
-                "Index "+indexName + " must exist.\n" +
-                "No index or alias named "+indexName+"_1 or "+ indexName +"_2 must exist.");
+    assertInitialUpdateAllowed(function(err,msg) {
+        if (err) return callback(err,msg);
 
         performUpdate(indexName+ "_1",indexName,indexName,
-            delAndPutAlias,
-            function(err,alias){
-                if (err) {
-                    return callback(err,"Could not perform operation properly. " +
-                        "The indices may be in an inconsistent state now.")
-                } else {
-                    return callback(null,"The routine finished properly. The concrete index's name is " +
-                        indexName+"_1 and the alias is "+alias+ " now.")
-                }
-        })
+            delAndPutAlias,callback);
     });
 };
 
