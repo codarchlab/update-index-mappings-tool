@@ -1,5 +1,5 @@
 {
-	"types": [ "period" ],
-    "indexName" : "jeremy",
+    "types": [ "" ],
+    "indexName" : "",
     "esAddress" : "localhost:9200"
 }
