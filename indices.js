@@ -11,7 +11,6 @@
  * @author Daniel M. de Oliveira
  */
 
-
 var elasticsearch = require('elasticsearch');
 var Promise = require('bluebird');
 var types = require('./config/application').types;
@@ -30,14 +29,18 @@ var client = new elasticsearch.Client({
 	log: 'info'
 });
 
-
-// update mappings for all types
+/**
+ * Update mappings for all types
+ *
+ * @param index
+ * @param callback
+ */
 function updateMappings(index, callback) {
     var promises = [];
     types.forEach(function(type) {
 
-        console.log("type:"+type+"content:"+JSON.stringify(mappings[type]))
-
+        console.log("type: "+type+" updated ");
+            // ":"+JSON.stringify(mappings[type]))
 
         promises.push(client.indices.putMapping({
             index: index, type: type, body: mappings[type]
@@ -48,11 +51,17 @@ function updateMappings(index, callback) {
     }).catch(function(err) {
         callback(err, null)
     });
-};
+}
 
 
-
-// reindex current index documents to new index
+/**
+ * Reindex current index documents to new index
+ *
+ * @param sourceIndex
+ * @param targetIndex
+ * @param lastIndexTime
+ * @param callback
+ */
 function copyIndex(sourceIndex, targetIndex, lastIndexTime, callback) {
 
     var currentIndexTime = new Date();
@@ -73,7 +82,7 @@ function copyIndex(sourceIndex, targetIndex, lastIndexTime, callback) {
     client.search(esReq, function getMoreUntilDone(err, res) {
         if (err) return callback(err, null);
         console.log("Scrolling", res);
-        if (res.hits.total == 0) return callback("0 hits.   Nothing to copy.", true);
+        if (res.hits.total == 0) return callback(null, true);
         var bulk = [];
         res.hits.hits.forEach(function(hit) {
             bulk.push({ index:  { _index: targetIndex, _type: hit._type, _id: hit._id } });
@@ -95,10 +104,11 @@ function copyIndex(sourceIndex, targetIndex, lastIndexTime, callback) {
             }
         });
     });
+}
 
-};
-
-// get index to which alias currently points
+/**
+ * Get index to which alias currently points
+ */
 function retrieveCurrentIndex(alias, callback) {
     client.indices.getAlias({ name: alias }, function(err, res) {
         if (err) return callback(err, null);
@@ -109,7 +119,7 @@ function retrieveCurrentIndex(alias, callback) {
         }
         callback(null, currentIndex);
     });
-};
+}
 
 /**
  * Determines which of the items
@@ -159,7 +169,9 @@ var handleIndexExistenceCondition= function(
 
     if (indexAlias_2DoesNotExist&&indexAlias_1DoesNotExist) {
 
-        initialIndexUpdate(indexName+ "_1",indexName,function(err,alias){
+        performUpdate(indexName+ "_1",indexName,indexName,
+            delAndPutAlias,
+            function(err,alias){
             if (err) {
                 return callback(err,"Could not perform operation properly. " +
                     "The indices may be in an inconsistent state now.")
@@ -178,44 +190,80 @@ var handleIndexExistenceCondition= function(
 };
 
 /**
- * Creates an index named newIndexName and provides the newest mappings for it.
- * Then copies the contents the of the index named alias over to newIndexName and
- * deletes the index named alias. So the alias can be used AS alias for newIndexName
- * now.
- *
- * @param newIndexName the newly created concrete index.
- * @param alias the name of the old index which will get deleted and used as an alias for
- *   newIndexName afterwards.
+ * @param newIndex
+ * @param currentIndex
+ * @param alias
  * @param callback
  */
-var initialIndexUpdate = function(newIndexName,alias,callback) {
+var delAndPutAlias = function(newIndex,currentIndex,alias,callback) {
+    client.indices.delete({index: alias}, function (err, res) {
+        console.log("DEBUG - Deleted old index " + alias, res);
+        client.indices.putAlias({index: newIndex, name: alias}, function (err, res) {
+            //if (err) return callback(err, null);
+            console.log("DEBUG - Added alias", res);
+            return callback(null, alias);
+        })
+    });
+};
 
-    client.indices.create({ index: newIndexName }, function(err, res) {
-        if (err) return callback(err, null);
-        console.log("Created index", newIndexName, res);
-        updateMappings(newIndexName, function(err, res) {
+/**
+ * @param newIndex
+ * @param currentIndex
+ * @param alias
+ * @param callback
+ */
+var switchAlias = function(newIndex,currentIndex,alias,callback) {
+    client.indices.deleteAlias(
+        { index: currentIndex, name: indexName}, function(err, res) {
             if (err) return callback(err, null);
-            console.log("Updated mappings", res);
-            copyIndex(alias, newIndexName, "1900-01-01", function(err, res) {
+            console.log("DEBUG - Deleted alias", res);
+            client.indices.putAlias({ index: newIndex, name: indexName }, function(err, res) {
                 if (err) return callback(err, null);
-                console.log("Copied index "+ alias +" to "+ newIndexName);
+                console.log("DEBUG - Added alias", res);
+                return callback(null, { success: true, currentIndex: currentIndex });
+            });
+        })
+};
 
-                client.indices.delete({ index: alias }, function(err, res) {
-                    console.log("Deleted old index "+ alias, res);
-                    client.indices.putAlias({ index: newIndexName, name: alias }, function(err, res) {
-                        //if (err) return callback(err, null);
-                        console.log("Added alias", res);
-                        return callback(null, alias);
-                    })
+/**
+ * @param newIndex name of the new index to create
+ * @param currentIndex name of the current index
+ * @param alias alias which should point to newIndex after successful operation.
+ * @param after function to perform after everything else is done in the common body.
+ * @param callback
+ */
+var performUpdate = function(newIndex,currentIndex,alias,after,callback) {
+
+    // delete new index (if it already exists)
+    client.indices.delete({ index: newIndex }, function(err, res) {
+        console.log("DEBUG - Deleted index " + newIndex);
+
+        client.indices.create({index: newIndex}, function (err, res) {
+            if (err) return callback(err, null);
+
+            console.log("DEBUG - Created index " + newIndex);
+
+            updateMappings(newIndex, function (err, res) {
+
+                if (err) return callback(err, null);
+                console.log("DEBUG - Updated mappings", res);
+
+                copyIndex(currentIndex, newIndex, "1900-01-01", function (err, res) {
+                    if (err) return callback(err, null);
+                    console.log("DEBUG - Copied index " + alias + " to " + newIndex);
+
+                    after(newIndex,currentIndex,alias,callback);
                 });
             });
         });
     });
-
 };
 
-// reindex the whole index by creating a new index with updated mappings,
-// copying the documents from the current index and setting the alias when done
+
+/**
+ * Reindex the whole index by creating a new index with updated mappings,
+ * copying the documents from the current index and setting the alias when done
+ */
 var updateIndexMappings = function(callback) {
 
     retrieveCurrentIndex(indexName, function(err, currentIndex) {
@@ -228,36 +276,9 @@ var updateIndexMappings = function(callback) {
         }
 
         console.log("Concrete indexName: "+currentIndex);
-
-
-        // delete new index (if it already exists)
-        client.indices.delete({ index: newIndex }, function(err, res) {
-            console.log("Deleted index", newIndex, res);
-            // create new index
-            client.indices.create({ index: newIndex }, function(err, res) {
-                if (err) return callback(err, null);
-                console.log("Created index", newIndex, res);
-                updateMappings(newIndex, function(err, res) {
-                    if (err) return callback(err, null);
-                    console.log("Updated mappings", res);
-                    copyIndex(currentIndex, newIndex, "1900-01-01", function(err, res) {
-                        if (err) return callback(err, null);
-                        console.log("Copied index", currentIndex, newIndex);
-                        client.indices.deleteAlias(
-                                { index: currentIndex, name: indexName}, function(err, res) {
-                            if (err) return callback(err, null);
-                            console.log("Deleted alias", res);
-                            client.indices.putAlias({ index: newIndex, name: indexName }, function(err, res) {
-                                if (err) return callback(err, null);
-                                console.log("Added alias", res);
-                                return callback(null, { success: true, currentIndex: currentIndex });
-                            });
-                        })
-                    });
-                });
-            });
-        });
-
+        performUpdate(
+            newIndex,currentIndex,indexName,
+            switchAlias,callback);
     });
 };
 

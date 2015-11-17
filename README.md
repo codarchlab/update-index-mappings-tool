@@ -33,6 +33,9 @@ environment.
 
 ## Usage
 
+As mentioned before, the tool can be executed during normal operation of the index with zero downtime.
+
+
 The first time you call this tool it is assumed you only have one index whose name
 is configures in *config/application.json*. There must be no aliases and no suffixed versions
 of this index name. By running the line
@@ -56,6 +59,3 @@ node updateMappings.js
 The tool then creates a new index named like the alias plus the suffix *_2* (or *_1* respective), 
 inits it with the mappings from *config/types* copies over the contents from the old index and
 then sets the alias to this new index accordingly.
-
-**Note** that while the init version has to happen when the index is not accessed the second version can 
-be done anytime without downtime.
