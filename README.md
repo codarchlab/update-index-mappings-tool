@@ -31,6 +31,18 @@ npm install
 Before running the tool, check out the *config/application.json* to match your
 environment.
 
+For the type mapping to get updated properly create a folder for each 
+type below *config/types*, add a mapping.json to it 
+and add an entry to the types array in *config/application.json*. An example can be
+
+```
+"types": [ "period" ],
+```
+-->
+```
+config/types/period/mapping.json
+```
+
 ## Usage
 
 As mentioned before, the tool can be executed during normal operation of the index with zero downtime.
