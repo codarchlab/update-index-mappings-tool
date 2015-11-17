@@ -2,7 +2,7 @@ var indices = require('./indices');
 
 var args = process.argv.slice(2);
 if (args=='init') {
-    indices.initIfNotInitialized(function(err,res){
+    indices.initialUpdateIndexMappings(function(err,res){
         if (err) {
             console.log(err);
         }

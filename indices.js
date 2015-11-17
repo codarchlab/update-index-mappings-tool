@@ -1,12 +1,4 @@
 /**
- * Provides an abstraction from the lower level elasticsearch indices API.
- *
- * Clients can
- * * test if an index exist
- * * create an index
- * * update the index mapping
- *
- *
  * @author Sebastian Cuy
  * @author Daniel M. de Oliveira
  */
@@ -122,72 +114,39 @@ function retrieveCurrentIndex(alias, callback) {
 }
 
 /**
- * Determines which of the items
- * indexName, indexName_1, indexName does or does not exist.
+ * Determines if only the index named indexName does exist and no prefixed
+ * versions of it, which is the only condition an initial update is allowed
  *
- * @param callback
+ * @param callback(updateCondition)
+ *   initialUpdateAllowed is boolean can have one of the values
+ *     false
+ *     true
  */
-var determineIndexExistenceCondition = function(callback){
+var determineInitialUpdateCondition = function(callback){
 
     client.indices.get({index:indexName}, function(indexDoesNotExist) {
         client.indices.get({index:indexName+"_1"}, function(index_1DoesNotExist) {
             client.indices.get({index:indexName+"_2"}, function(index_2DoesNotExist) {
-                handleIndexExistenceCondition(
-                    indexDoesNotExist,
-                    index_1DoesNotExist,
-                    index_2DoesNotExist,
-                    callback);
+
+                console.log("Index "+indexName+ " exists: "+!indexDoesNotExist);
+                console.log("Index "+indexName+ "_1 exists: "+!index_1DoesNotExist);
+                console.log("Index "+indexName+ "_2 exists: "+!index_2DoesNotExist);
+
+                if (indexDoesNotExist) return callback(false);
+                if (index_2DoesNotExist&&index_1DoesNotExist)
+                    return callback(true);
+                else
+                    return callback(false);
             });
         });
     });
 };
 
 
-/**
- * Handles the existence conditions determindes in
- * {@link determineIndexExistenceConditions}. Under certain
- * conditions (see implementation) the initial index update
- * operation gets performed.
- *
- * @param indexDoesNotExist
- * @param indexAlias_1DoesNotExist
- * @param indexAlias_2DoesNotExist
- * @param callback
- * @returns a callback (res,msg) with a msg describing if the update operation
- *   has been performed or why      if not.
- */
-var handleIndexExistenceCondition= function(
-    indexDoesNotExist,
-    indexAlias_1DoesNotExist,
-    indexAlias_2DoesNotExist,
-    callback) {
 
-    if (indexDoesNotExist) {
-        return callback(null,indexName + " does not exist. \n" +
-            "Neither as index name nor as alias. Aborting operation.");
-    }
 
-    if (indexAlias_2DoesNotExist&&indexAlias_1DoesNotExist) {
 
-        performUpdate(indexName+ "_1",indexName,indexName,
-            delAndPutAlias,
-            function(err,alias){
-            if (err) {
-                return callback(err,"Could not perform operation properly. " +
-                    "The indices may be in an inconsistent state now.")
-            } else {
-                return callback(null,"The routine finished properly. The concrete index's name is " +
-                    indexName+"_1 and the alias is "+alias+ " now.")
-            }
-        });
-    } else {
-        return callback(null,"If you want to perform the init routine, \n" +
-            "one of the two following indices must exist, \n"+
-            indexName+"_1 exists: "+!indexAlias_1DoesNotExist+"\n"+
-            indexName+"_2 exists: "+!indexAlias_2DoesNotExist+"\n"+
-            "Only the index named "+indexName+ " itself should be there.");
-    }
-};
+
 
 /**
  * @param newIndex
@@ -234,23 +193,15 @@ var switchAlias = function(newIndex,currentIndex,alias,callback) {
  */
 var performUpdate = function(newIndex,currentIndex,alias,after,callback) {
 
-    // delete new index (if it already exists)
     client.indices.delete({ index: newIndex }, function(err, res) {
-        console.log("DEBUG - Deleted index " + newIndex);
-
         client.indices.create({index: newIndex}, function (err, res) {
             if (err) return callback(err, null);
 
-            console.log("DEBUG - Created index " + newIndex);
-
             updateMappings(newIndex, function (err, res) {
-
                 if (err) return callback(err, null);
-                console.log("DEBUG - Updated mappings", res);
 
                 copyIndex(currentIndex, newIndex, "1900-01-01", function (err, res) {
                     if (err) return callback(err, null);
-                    console.log("DEBUG - Copied index " + alias + " to " + newIndex);
 
                     after(newIndex,currentIndex,alias,callback);
                 });
@@ -282,7 +233,44 @@ var updateIndexMappings = function(callback) {
     });
 };
 
+/**
+ * Handles the existence conditions determindes in
+ * {@link determineIndexExistenceConditions}. Under certain
+ * conditions (see implementation) the initial index update
+ * operation gets performed.
+ *
+ * @param indexDoesNotExist
+ * @param indexAlias_1DoesNotExist
+ * @param indexAlias_2DoesNotExist
+ * @param callback
+ * @returns a callback (res,msg) with a msg describing if the update operation
+ *   has been performed or why      if not.
+ */
+var initialUpdateIndexMappings= function(
+    callback) {
+
+    determineInitialUpdateCondition(function(initialUpdateAllowed) {
+
+        if (initialUpdateAllowed==false)
+            return callback(null,"Initial update is not allowed.\n" +
+                "Index "+indexName + " must exist.\n" +
+                "No index or alias named "+indexName+"_1 or "+ indexName +"_2 must exist.");
+
+        performUpdate(indexName+ "_1",indexName,indexName,
+            delAndPutAlias,
+            function(err,alias){
+                if (err) {
+                    return callback(err,"Could not perform operation properly. " +
+                        "The indices may be in an inconsistent state now.")
+                } else {
+                    return callback(null,"The routine finished properly. The concrete index's name is " +
+                        indexName+"_1 and the alias is "+alias+ " now.")
+                }
+        })
+    });
+};
+
 module.exports = {
 	updateIndexMappings: updateIndexMappings,
-    initIfNotInitialized: determineIndexExistenceCondition
+    initialUpdateIndexMappings: initialUpdateIndexMappings
 };
